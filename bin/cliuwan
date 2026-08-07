@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# cliuwan launcher.
+#
+# Looks for the jar in the usual places, so it works both from a freshly built
+# checkout and from a system-wide install.
+set -euo pipefail
+
+if [[ -n "${CLIUWAN_JAR:-}" ]]; then
+  JAR="${CLIUWAN_JAR}"
+else
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  CANDIDATES=(
+    "${SCRIPT_DIR}/../build/libs/cliuwan.jar"        # built checkout
+    "${SCRIPT_DIR}/../lib/cliuwan.jar"               # installed next to the script
+    "${HOME}/.local/share/cliuwan/cliuwan.jar"       # user install
+    "/usr/local/share/cliuwan/cliuwan.jar"           # system install
+  )
+  JAR=""
+  for candidate in "${CANDIDATES[@]}"; do
+    if [[ -f "${candidate}" ]]; then
+      JAR="${candidate}"
+      break
+    fi
+  done
+fi
+
+if [[ -z "${JAR}" || ! -f "${JAR}" ]]; then
+  echo "cliuwan: cannot find cliuwan.jar." >&2
+  echo "         Build it with './gradlew build', or set CLIUWAN_JAR." >&2
+  exit 1
+fi
+
+# -XX:TieredStopAtLevel=1 and -Xshare:auto cut startup time: for a process that lives for
+# fractions of a second, letting C2 fully compile is wasted work.
+exec java -XX:TieredStopAtLevel=1 -Xshare:auto -jar "${JAR}" "$@"

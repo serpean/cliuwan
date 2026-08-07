@@ -1,0 +1,12 @@
+/.gradle/
+/build/
+/.idea/
+*.ipr
+*.iws
+*.iml
+/out/
+.DS_Store
+
+# Nunca versionar credenciales
+credentials
+*.credentials

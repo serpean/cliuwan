@@ -1,0 +1,79 @@
+plugins {
+    id 'java'
+    id 'application'
+}
+
+group = 'io.github.serpean'
+version = '0.1.0'
+description = 'cliuwan - query Kiuwan applications and security defects from the command line'
+
+// No Spring Boot on purpose: the CLI is invoked once per query, so JVM startup is the
+// dominant cost. Picocli + the JDK HttpClient start in ~0.2s against ~1.2s for a Spring
+// context.
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+ext {
+    picocliVersion = '4.7.6'
+    jacksonVersion = '2.18.2'
+    junitVersion = '5.11.4'
+}
+
+dependencies {
+    implementation "info.picocli:picocli:${picocliVersion}"
+    implementation "com.fasterxml.jackson.core:jackson-databind:${jacksonVersion}"
+    annotationProcessor "info.picocli:picocli-codegen:${picocliVersion}"
+
+    testImplementation "org.junit.jupiter:junit-jupiter:${junitVersion}"
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.11.4'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.compilerArgs += ["-Aproject=${project.group}/${project.name}"]
+}
+
+application {
+    mainClass = 'io.github.serpean.cliuwan.CliuwanCommand'
+    applicationName = 'cliuwan'
+}
+
+// Self-contained jar: `java -jar build/libs/cliuwan.jar` with no external classpath.
+tasks.register('fatJar', Jar) {
+    archiveFileName = 'cliuwan.jar'
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    manifest {
+        attributes 'Main-Class': application.mainClass.get(),
+                   'Implementation-Version': project.version
+    }
+    from sourceSets.main.output
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+    exclude 'META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA', 'module-info.class'
+}
+
+tasks.named('build') {
+    dependsOn 'fatJar'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+    testLogging {
+        events 'passed', 'skipped', 'failed'
+    }
+    // The cache tests write to disk. Point them at a build directory so they never touch
+    // the real ~/.cache of whoever runs the suite.
+    //
+    // Credentials are deliberately not redirected here: CredentialsTest isolates itself by
+    // replacing 'user.home', and setting CLIUWAN_CREDENTIALS_FILE would take precedence
+    // over that replacement, which is exactly what those tests verify.
+    environment 'XDG_CACHE_HOME', layout.buildDirectory.dir('test-home/cache').get().asFile.absolutePath
+}
