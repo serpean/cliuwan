@@ -80,7 +80,9 @@ jobs:
           $bin = "build/native/nativeCompile/${{ matrix.binary }}"
           & $bin --version
           & $bin --help > $null
-          $fields = & $bin defects --list-fields
+          # @() forces an array even when the command returns a single line, so -notcontains
+          # compares elements rather than the whole string.
+          $fields = @(& $bin defects --list-fields)
           if ($fields -notcontains 'cweId') { throw 'list-fields did not return cweId' }
           # Same isolation caveat as on Unix: point the credentials file somewhere that does
           # not exist rather than moving HOME, which the JVM ignores.
@@ -88,8 +90,12 @@ jobs:
           Remove-Item Env:KIUWAN_USER -ErrorAction SilentlyContinue
           Remove-Item Env:KIUWAN_PASS -ErrorAction SilentlyContinue
           & $bin apps *> $null
-          if ($LASTEXITCODE -ne 3) { throw "expected exit 3 without credentials, got $LASTEXITCODE" }
+          $noCredsExit = $LASTEXITCODE
+          if ($noCredsExit -ne 3) { throw "expected exit 3 without credentials, got $noCredsExit" }
           Write-Host 'smoke tests passed'
+          # Actions ends a pwsh step with `exit $LASTEXITCODE`, and the check above left it at
+          # 3 on purpose, which failed the step even though every assertion passed. Reset it.
+          exit 0
 
       - name: Rename for release
         shell: bash
