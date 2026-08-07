@@ -3,11 +3,9 @@ name: Release
 on:
   push:
     tags: ['v*']
+  # Manual runs build and smoke-test every platform without publishing anything: the
+  # publish job below only runs for a tag. Use it to check the pipeline before tagging.
   workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Tag to build (for a dry run without publishing)'
-        required: false
 
 permissions:
   contents: write
