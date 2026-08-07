@@ -5,6 +5,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
@@ -61,6 +63,7 @@ class CredentialsTest {
 
     @Test
     @DisplayName("The stored file is not readable by other users")
+    @DisabledOnOs(value = OS.WINDOWS, disabledReason = "POSIX permissions do not exist on Windows")
     void savedFileIsNotWorldReadable() throws IOException {
         Path file = Credentials.save("username", "secret");
 
@@ -73,6 +76,7 @@ class CredentialsTest {
 
     @Test
     @DisplayName("The config directory is not left open to others either")
+    @DisabledOnOs(value = OS.WINDOWS, disabledReason = "POSIX permissions do not exist on Windows")
     void configDirectoryIsPrivate() throws IOException {
         Path file = Credentials.save("username", "secret");
 
@@ -80,6 +84,19 @@ class CredentialsTest {
 
         assertFalse(perms.contains(PosixFilePermission.OTHERS_READ));
         assertFalse(perms.contains(PosixFilePermission.OTHERS_EXECUTE));
+    }
+
+    @Test
+    @DisplayName("Storing works on filesystems without POSIX permissions")
+    void savesOnNonPosixFilesystems() {
+        // Windows has no POSIX permissions, so Credentials.save() cannot harden the file and
+        // swallows the UnsupportedOperationException. This runs everywhere and pins the part
+        // that must hold regardless: the credentials are still written and readable back.
+        // The two tests above assert the hardening itself and only run where it is possible.
+        Path file = Credentials.save("username", "secret");
+
+        assertTrue(Files.exists(file));
+        assertEquals("secret", Credentials.resolve().pass());
     }
 
     @Test

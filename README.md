@@ -115,6 +115,11 @@ echo "$KIUWAN_PASS" | cliuwan login -u your_username --password-stdin
 Environment variables take precedence over the file. There is deliberately **no `--pass`
 option**: a password passed as an argument lands in your shell history and is visible in `ps`.
 
+> **Windows**: POSIX permissions do not exist there, so the credentials file is written without
+> the `600` hardening applied on Linux and macOS. It inherits whatever your user profile
+> directory grants. If that matters in your environment, use `KIUWAN_USER` / `KIUWAN_PASS`
+> instead, or restrict the file with ACLs.
+
 ## Usage
 
 ### Find an application
