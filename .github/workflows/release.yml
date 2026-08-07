@@ -14,14 +14,20 @@ jobs:
   native:
     name: ${{ matrix.label }}
     runs-on: ${{ matrix.os }}
+    # A retired or misspelled runner label does not fail: the job queues forever waiting for
+    # a runner that will never arrive, up to the 6-hour default. This caps that to something
+    # noticeable. macos-13 was retired in December 2025 and did exactly this.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         include:
           - { os: ubuntu-latest,    label: linux-x64,     artifact: cliuwan-linux-x64,      binary: cliuwan }
           - { os: ubuntu-24.04-arm, label: linux-arm64,   artifact: cliuwan-linux-arm64,    binary: cliuwan }
-          - { os: macos-latest,     label: darwin-arm64,  artifact: cliuwan-darwin-arm64,   binary: cliuwan }
-          - { os: macos-13,         label: darwin-x64,    artifact: cliuwan-darwin-x64,     binary: cliuwan }
+          - { os: macos-15,         label: darwin-arm64,  artifact: cliuwan-darwin-arm64,   binary: cliuwan }
+          # Intel macOS. GitHub drops x86_64 macOS support when the macos-15 image retires in
+          # autumn 2027; after that, Intel Macs fall back to the jar.
+          - { os: macos-15-intel,   label: darwin-x64,    artifact: cliuwan-darwin-x64,     binary: cliuwan }
           - { os: windows-latest,   label: windows-x64,   artifact: cliuwan-windows-x64.exe, binary: cliuwan.exe }
 
     steps:
@@ -100,6 +106,7 @@ jobs:
   jar:
     name: portable jar
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -124,6 +131,7 @@ jobs:
     name: Publish release
     needs: [native, jar]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
       - uses: actions/download-artifact@v4
