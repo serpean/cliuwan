@@ -10,6 +10,7 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -77,6 +78,21 @@ class CliMechanicsTest {
         Run result = run("nonsense");
 
         assertEquals(CliuwanCommand.EXIT_USAGE, result.exitCode());
+    }
+
+    @Test
+    @DisplayName("--version reports a real version, never 'dev'")
+    void versionIsBakedIn() {
+        // The version used to come from the jar manifest, which a native image does not have,
+        // so release binaries reported themselves as "dev". It is now a compiled-in constant.
+        Run result = run("--version");
+
+        assertEquals(CliuwanCommand.EXIT_OK, result.exitCode());
+        assertTrue(result.out().startsWith("cliuwan "), result.out());
+        assertFalse(result.out().contains("dev"),
+            "the version must be the real one, not the 'dev' placeholder: " + result.out());
+        assertTrue(result.out().matches("(?s)cliuwan \\d+\\.\\d+.*"),
+            "expected a x.y.z version: " + result.out());
     }
 
     @Test

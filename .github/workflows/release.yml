@@ -1,0 +1,175 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build (for a dry run without publishing)'
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  native:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,    label: linux-x64,     artifact: cliuwan-linux-x64,      binary: cliuwan }
+          - { os: ubuntu-24.04-arm, label: linux-arm64,   artifact: cliuwan-linux-arm64,    binary: cliuwan }
+          - { os: macos-latest,     label: darwin-arm64,  artifact: cliuwan-darwin-arm64,   binary: cliuwan }
+          - { os: macos-13,         label: darwin-x64,    artifact: cliuwan-darwin-x64,     binary: cliuwan }
+          - { os: windows-latest,   label: windows-x64,   artifact: cliuwan-windows-x64.exe, binary: cliuwan.exe }
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up GraalVM
+        uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '21'
+          distribution: 'graalvm-community'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          native-image-job-reports: 'true'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Run the test suite
+        run: ./gradlew test --no-daemon
+
+      - name: Build the native image
+        run: ./gradlew nativeCompile --no-daemon
+
+      # The reflection failure that record types cause does not show up at build time: the
+      # image links cleanly and dies on first use. So every binary is executed here, exercising
+      # the paths that need reflection, before it is allowed near a release.
+      - name: Smoke-test the binary (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          BIN=build/native/nativeCompile/${{ matrix.binary }}
+          "$BIN" --version
+          "$BIN" --help > /dev/null
+          # Goes through Class.getRecordComponents(), which is what broke without the
+          # reflect-config.
+          "$BIN" defects --list-fields | grep -q cweId
+          # Exit code 3 with no credentials, rather than a crash.
+          #
+          # Isolation is done with CLIUWAN_CREDENTIALS_FILE, not by overriding HOME: the JVM
+          # reads user.home from the OS and ignores $HOME, so a redirected HOME would still
+          # find a real credentials file and this check would pass for the wrong reason.
+          set +e
+          env -u KIUWAN_USER -u KIUWAN_PASS \
+            CLIUWAN_CREDENTIALS_FILE=/nonexistent/cliuwan-creds "$BIN" apps > /dev/null 2>&1
+          [ $? -eq 3 ] || { echo "expected exit 3 without credentials"; exit 1; }
+          echo "smoke tests passed"
+
+      - name: Smoke-test the binary (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $bin = "build/native/nativeCompile/${{ matrix.binary }}"
+          & $bin --version
+          & $bin --help > $null
+          $fields = & $bin defects --list-fields
+          if ($fields -notcontains 'cweId') { throw 'list-fields did not return cweId' }
+          # Same isolation caveat as on Unix: point the credentials file somewhere that does
+          # not exist rather than moving HOME, which the JVM ignores.
+          $env:CLIUWAN_CREDENTIALS_FILE = 'C:\nonexistent\cliuwan-creds'
+          Remove-Item Env:KIUWAN_USER -ErrorAction SilentlyContinue
+          Remove-Item Env:KIUWAN_PASS -ErrorAction SilentlyContinue
+          & $bin apps *> $null
+          if ($LASTEXITCODE -ne 3) { throw "expected exit 3 without credentials, got $LASTEXITCODE" }
+          Write-Host 'smoke tests passed'
+
+      - name: Rename for release
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp "build/native/nativeCompile/${{ matrix.binary }}" "dist/${{ matrix.artifact }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.artifact }}
+          retention-days: 5
+
+  jar:
+    name: portable jar
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # Kept as a fallback for platforms with no native binary (Linux musl, BSD, 32-bit).
+      - name: Build the jar
+        run: ./gradlew build --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cliuwan.jar
+          path: build/libs/cliuwan.jar
+          retention-days: 5
+
+  publish:
+    name: Publish release
+    needs: [native, jar]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List what is about to be published
+        run: ls -lh artifacts/
+
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Publish
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
+          body: |
+            ## Install
+
+            Download the binary for your platform, make it executable, and put it on your PATH:
+
+            ```bash
+            # macOS (Apple Silicon)
+            curl -L https://github.com/serpean/cliuwan/releases/download/${{ github.ref_name }}/cliuwan-darwin-arm64 -o cliuwan
+
+            # Linux x64
+            curl -L https://github.com/serpean/cliuwan/releases/download/${{ github.ref_name }}/cliuwan-linux-x64 -o cliuwan
+
+            chmod +x cliuwan && sudo mv cliuwan /usr/local/bin/
+            cliuwan login
+            ```
+
+            No Java needed: these are native binaries that start in about 20 ms.
+
+            **macOS**: the binaries are not notarised, so Gatekeeper will block one downloaded
+            through a browser. Either fetch it with `curl` as above, or clear the flag with
+            `xattr -d com.apple.quarantine cliuwan`.
+
+            `cliuwan.jar` is there as a fallback for platforms without a native build; it needs
+            Java 21 and starts in about 280 ms.
+
+            Verify your download against `SHA256SUMS`.

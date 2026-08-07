@@ -153,12 +153,17 @@ public class CliuwanCommand implements Callable<Integer> {
         return (value == null || value.isBlank()) ? fallback : value;
     }
 
-    /** Reads the version from the jar manifest. */
+    /**
+     * Reports the version, which is compiled in as a constant by the {@code generateBuildInfo}
+     * Gradle task.
+     *
+     * <p>Not read from the jar manifest: a native image has no manifest, so that route reports
+     * "dev" on every release binary.
+     */
     static class VersionProvider implements CommandLine.IVersionProvider {
         @Override
         public String[] getVersion() {
-            String version = CliuwanCommand.class.getPackage().getImplementationVersion();
-            return new String[]{"cliuwan " + (version != null ? version : "dev")};
+            return new String[]{"cliuwan " + BuildInfo.VERSION};
         }
     }
 

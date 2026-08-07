@@ -1,0 +1,52 @@
+[
+  {
+    "comment": "Records that Jackson serializes and deserializes, plus DefectRecord's component accessors, which Formatter.defectFieldNames() reads through getRecordComponents(). Native Image drops record metadata unless it is registered here: without this the binary builds fine and then fails at runtime.",
+    "name": "io.github.serpean.cliuwan.dto.DefectRecord",
+    "allDeclaredFields": true,
+    "allDeclaredMethods": true,
+    "allDeclaredConstructors": true,
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true
+  },
+  {
+    "name": "io.github.serpean.cliuwan.dto.DefectsResponse",
+    "allDeclaredFields": true,
+    "allDeclaredMethods": true,
+    "allDeclaredConstructors": true,
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true
+  },
+  {
+    "name": "io.github.serpean.cliuwan.dto.ApplicationRecord",
+    "allDeclaredFields": true,
+    "allDeclaredMethods": true,
+    "allDeclaredConstructors": true,
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true
+  },
+  {
+    "name": "io.github.serpean.cliuwan.dto.AnalysisRecord",
+    "allDeclaredFields": true,
+    "allDeclaredMethods": true,
+    "allDeclaredConstructors": true,
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true
+  },
+  {
+    "name": "io.github.serpean.cliuwan.dto.AnalysisSummaryRecord",
+    "allDeclaredFields": true,
+    "allDeclaredMethods": true,
+    "allDeclaredConstructors": true,
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true
+  },
+  {
+    "comment": "Cached defect queries are written and read back as JSON, so this nested record needs the same treatment.",
+    "name": "io.github.serpean.cliuwan.client.KiuwanClient$DefectsQueryResult",
+    "allDeclaredFields": true,
+    "allDeclaredMethods": true,
+    "allDeclaredConstructors": true,
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true
+  }
+]

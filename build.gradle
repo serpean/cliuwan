@@ -1,6 +1,7 @@
 plugins {
     id 'java'
     id 'application'
+    id 'org.graalvm.buildtools.native' version '0.10.3'
 }
 
 group = 'io.github.serpean'
@@ -40,6 +41,37 @@ tasks.withType(JavaCompile).configureEach {
     options.compilerArgs += ["-Aproject=${project.group}/${project.name}"]
 }
 
+// The version is generated as a Java constant rather than read from the jar manifest,
+// because a native image has no manifest: reading it there yields "dev" on every release
+// binary. Passing -Dcliuwan.version to native-image does not work either -- that sets a
+// property for the image build, not for the running image.
+def generatedVersionDir = layout.buildDirectory.dir('generated/sources/version/java')
+
+tasks.register('generateBuildInfo') {
+    def outputDir = generatedVersionDir
+    def projectVersion = project.version.toString()
+    inputs.property('version', projectVersion)
+    outputs.dir(outputDir)
+    doLast {
+        def file = outputDir.get().file('io/github/serpean/cliuwan/BuildInfo.java').asFile
+        file.parentFile.mkdirs()
+        file.text = """package io.github.serpean.cliuwan;
+
+/** Generated at build time by the 'generateBuildInfo' task. Do not edit. */
+final class BuildInfo {
+
+    static final String VERSION = "${projectVersion}";
+
+    private BuildInfo() {
+    }
+}
+"""
+    }
+}
+
+sourceSets.main.java.srcDir generatedVersionDir
+tasks.named('compileJava') { dependsOn 'generateBuildInfo' }
+
 application {
     mainClass = 'io.github.serpean.cliuwan.CliuwanCommand'
     applicationName = 'cliuwan'
@@ -62,6 +94,30 @@ tasks.register('fatJar', Jar) {
 
 tasks.named('build') {
     dependsOn 'fatJar'
+}
+
+// Native binaries: one per platform, since GraalVM cannot cross-compile. Built in CI by
+// .github/workflows/release.yml; locally it needs a GraalVM JDK on JAVA_HOME.
+graalvmNative {
+    // Left to the ambient JDK rather than letting Gradle hunt for a GraalVM toolchain: a
+    // plain `./gradlew build` on any JDK 21 must keep working, and only nativeCompile
+    // actually requires GraalVM.
+    toolchainDetection = false
+
+    binaries {
+        main {
+            imageName = 'cliuwan'
+            mainClass = application.mainClass.get()
+            // --no-fallback makes the build fail rather than quietly emitting an image that
+            // still needs a JVM, which would defeat the point.
+            buildArgs.add('--no-fallback')
+            buildArgs.add('-O2')
+            // Reflection metadata for the records lives in
+            // src/main/resources/META-INF/native-image/. Without it the image builds and then
+            // dies at runtime on getRecordComponents(), so the release workflow runs every
+            // binary before publishing it.
+        }
+    }
 }
 
 tasks.named('test') {

@@ -30,6 +30,38 @@ results back.
 
 ## Install
 
+### Native binary (recommended)
+
+No Java required. Starts in about 20 ms.
+
+```bash
+# macOS (Apple Silicon)
+curl -L https://github.com/serpean/cliuwan/releases/latest/download/cliuwan-darwin-arm64 -o cliuwan
+
+# Linux x64
+curl -L https://github.com/serpean/cliuwan/releases/latest/download/cliuwan-linux-x64 -o cliuwan
+
+chmod +x cliuwan && sudo mv cliuwan /usr/local/bin/
+cliuwan login
+```
+
+| Platform | Asset |
+|---|---|
+| Linux x64 | `cliuwan-linux-x64` |
+| Linux arm64 | `cliuwan-linux-arm64` |
+| macOS Apple Silicon | `cliuwan-darwin-arm64` |
+| macOS Intel | `cliuwan-darwin-x64` |
+| Windows x64 | `cliuwan-windows-x64.exe` |
+| Any (needs Java 21) | `cliuwan.jar` |
+
+Every release ships a `SHA256SUMS` file to verify against.
+
+> **macOS**: the binaries are not notarised. Gatekeeper blocks anything downloaded through a
+> browser, so either fetch it with `curl` as above or clear the flag with
+> `xattr -d com.apple.quarantine cliuwan`.
+
+### From source
+
 Requires **Java 21 or newer**.
 
 ```bash
@@ -46,6 +78,13 @@ Without installing anything:
 ```bash
 ./gradlew build
 java -jar build/libs/cliuwan.jar --help
+```
+
+To build a native binary yourself, with a GraalVM JDK on `JAVA_HOME`:
+
+```bash
+./gradlew nativeCompile
+./build/native/nativeCompile/cliuwan --version
 ```
 
 ## Credentials
@@ -227,7 +266,21 @@ Two behaviours worth knowing, both handled here:
 
 Tests spin up a JDK `HttpServer` that mimics the Kiuwan API rather than pulling in WireMock,
 to keep the dependency list short. There is no Spring: the CLI is invoked once per query, so
-JVM startup dominates — Picocli plus the JDK HTTP client start in about 0.2s.
+startup dominates — Picocli plus the JDK HTTP client start in about 0.2s on the JVM, and about
+0.02s once compiled ahead of time.
+
+### A note on the native build
+
+GraalVM strips record metadata unless it is registered, because static analysis cannot see
+that Jackson and `Class.getRecordComponents()` reach for it reflectively. The registrations
+live in `src/main/resources/META-INF/native-image/`; Picocli generates its own through
+`picocli-codegen`.
+
+This failure mode is worth knowing about: the image links cleanly and then throws
+`UnsupportedFeatureError` on first use. That is why the release workflow **runs** every binary
+it builds — exercising `--list-fields`, which goes through `getRecordComponents()` — before
+publishing it. If you add a type that gets serialized, register it there and check the binary,
+not just the test suite.
 
 Contributions are welcome. Please keep the test suite green and add coverage for whatever you
 change.
