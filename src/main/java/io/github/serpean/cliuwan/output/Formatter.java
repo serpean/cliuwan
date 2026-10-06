@@ -3,9 +3,12 @@ package io.github.serpean.cliuwan.output;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
+import io.github.serpean.cliuwan.dto.AnalysisDetailRecord;
 import io.github.serpean.cliuwan.dto.AnalysisSummaryRecord;
 import io.github.serpean.cliuwan.dto.ApplicationRecord;
+import io.github.serpean.cliuwan.dto.AuditReport;
 import io.github.serpean.cliuwan.dto.DefectRecord;
+import io.github.serpean.cliuwan.dto.QualityModelRecord;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -207,12 +210,13 @@ public final class Formatter {
         StringBuilder sb = new StringBuilder();
         sb.append("Application: ").append(appName).append('\n');
         sb.append("Analyses: ").append(analyses.size()).append('\n');
-        sb.append("=".repeat(78)).append('\n');
-        sb.append(String.format("%-12s %-18s %-9s %-22s %s%n",
-            "DATE", "TYPE", "STATUS", "CODE", "LABEL"));
+        sb.append("=".repeat(100)).append('\n');
+        sb.append(String.format("%-12s %-18s %-9s %-16s %-6s %-20s %s%n",
+            "DATE", "TYPE", "STATUS", "MODEL", "AUDIT", "CODE", "LABEL"));
         for (AnalysisSummaryRecord a : analyses) {
-            sb.append(String.format("%-12s %-18s %-9s %-22s %s%n",
-                a.day(), nvl(a.analysisScope()), nvl(a.status()), nvl(a.code()), nvl(a.label())));
+            sb.append(String.format("%-12s %-18s %-9s %-16s %-6s %-20s %s%n",
+                a.day(), nvl(a.analysisScope()), nvl(a.status()), dash(a.qualityModel()),
+                dash(a.auditResult()), nvl(a.code()), nvl(a.label())));
         }
         return sb.toString();
     }
@@ -224,11 +228,14 @@ public final class Formatter {
             sb.append("No analyses.\n");
             return sb.toString();
         }
-        sb.append("| Date | Type | Status | Code | Label |\n|---|---|---|---|---|\n");
+        sb.append("| Date | Type | Status | Model | Audit | Code | Label |\n"
+            + "|---|---|---|---|---|---|---|\n");
         for (AnalysisSummaryRecord a : analyses) {
             sb.append("| ").append(a.day())
               .append(" | ").append(escapePipes(nvl(a.analysisScope())))
               .append(" | ").append(nvl(a.status()))
+              .append(" | ").append(escapePipes(dash(a.qualityModel())))
+              .append(" | ").append(dash(a.auditResult()))
               .append(" | `").append(nvl(a.code())).append('`')
               .append(" | ").append(escapePipes(nvl(a.label()))).append(" |\n");
         }
@@ -261,7 +268,165 @@ public final class Formatter {
             }
             sb.append(')');
         }
+        if (analysis.qualityModel() != null && !analysis.qualityModel().isBlank()) {
+            sb.append(" model ").append(analysis.qualityModel());
+        }
         return sb.toString();
+    }
+
+    // -------------------------------------------------------------- Models
+
+    /** Quality-model listing as plain text. */
+    public static String modelsAsText(List<QualityModelRecord> models) {
+        if (models.isEmpty()) {
+            return "No quality models found.";
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("Quality models: ").append(models.size()).append('\n');
+        sb.append("=".repeat(60)).append('\n');
+        sb.append(String.format("%-10s %-7s %s%n", "ID", "SHARED", "NAME"));
+        for (QualityModelRecord m : models) {
+            sb.append(String.format("%-10s %-7s %s%n",
+                m.id() == null ? "-" : m.id(), m.shared() == null ? "-" : m.shared(),
+                nvl(m.name())));
+        }
+        return sb.toString();
+    }
+
+    /** Quality-model listing as a markdown table. */
+    public static String modelsAsMarkdown(List<QualityModelRecord> models) {
+        StringBuilder sb = new StringBuilder("## Kiuwan quality models\n\n");
+        if (models.isEmpty()) {
+            sb.append("No quality models found.\n");
+            return sb.toString();
+        }
+        sb.append("| Id | Name | Shared |\n|---|---|---|\n");
+        for (QualityModelRecord m : models) {
+            sb.append("| ").append(m.id() == null ? "-" : m.id())
+              .append(" | ").append(escapePipes(nvl(m.name())))
+              .append(" | ").append(m.shared() == null ? "-" : m.shared()).append(" |\n");
+        }
+        return sb.toString();
+    }
+
+    // --------------------------------------------------------------- Audit
+
+    /** Quality-gate results as plain text, one block per analysis. */
+    public static String auditsAsText(String appName, List<AuditReport> reports) {
+        if (reports.isEmpty()) {
+            return "Application '" + appName + "' has no audited analysis with those filters.";
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("Application: ").append(appName).append('\n');
+        for (AuditReport r : reports) {
+            sb.append("=".repeat(78)).append('\n');
+            sb.append(dash(r.qualityModel())).append(": ").append(auditVerdict(r))
+              .append("   ").append(nvl(r.analysisCode()))
+              .append("  ").append(nvl(r.label()))
+              .append("  ").append(day(r.date())).append('\n');
+            if (r.deliveryDefects() != null) {
+                AnalysisDetailRecord.DeliveryDefects d = r.deliveryDefects();
+                sb.append("  Defects: ").append(d.defects())
+                  .append(" (new ").append(d.newDefects())
+                  .append(", removed ").append(d.removedDefects()).append(")\n");
+            }
+            for (AnalysisDetailRecord.Checkpoint c : r.checkpoints()) {
+                sb.append("  [").append(dash(c.result())).append("] ").append(nvl(c.name()));
+                if (c.type() != null && !c.type().isBlank()) {
+                    sb.append(" - ").append(c.type());
+                }
+                if (Boolean.TRUE.equals(c.mandatory())) {
+                    sb.append(" (mandatory)");
+                }
+                sb.append('\n');
+                if (c.violatedRules() != null) {
+                    for (AnalysisDetailRecord.ViolatedRule v : c.violatedRules()) {
+                        sb.append("      ").append(nvl(v.ruleCode()))
+                          .append(": ").append(v.defectsCount()).append(" defects");
+                        if (v.suppressedDefectsCount() != null && v.suppressedDefectsCount() > 0) {
+                            sb.append(", ").append(v.suppressedDefectsCount()).append(" suppressed");
+                        }
+                        sb.append('\n');
+                    }
+                }
+            }
+            if (r.auditResultURL() != null && !r.auditResultURL().isBlank()) {
+                sb.append("  ").append(r.auditResultURL()).append('\n');
+            }
+        }
+        return sb.toString();
+    }
+
+    /** Quality-gate results as markdown: a summary table, then the failed checkpoints. */
+    public static String auditsAsMarkdown(String appName, List<AuditReport> reports) {
+        StringBuilder sb = new StringBuilder("## Kiuwan audit - ").append(appName).append("\n\n");
+        if (reports.isEmpty()) {
+            sb.append("No audited analysis with those filters.\n");
+            return sb.toString();
+        }
+        sb.append("| Model | Result | Score / threshold | Code | Label | Date | New defects |\n");
+        sb.append("|---|---|---|---|---|---|---|\n");
+        for (AuditReport r : reports) {
+            sb.append("| ").append(escapePipes(dash(r.qualityModel())))
+              .append(" | ").append(r.overallResult() == null ? "-" : "**" + r.overallResult() + "**")
+              .append(" | ").append(r.score() == null ? "-" : number(r.score())
+                    + (r.approvalThreshold() == null ? "" : " / " + number(r.approvalThreshold())))
+              .append(" | `").append(nvl(r.analysisCode())).append('`')
+              .append(" | ").append(escapePipes(nvl(r.label())))
+              .append(" | ").append(day(r.date()))
+              .append(" | ").append(r.deliveryDefects() == null || r.deliveryDefects().newDefects() == null
+                    ? "-" : r.deliveryDefects().newDefects())
+              .append(" |\n");
+        }
+        for (AuditReport r : reports) {
+            List<AnalysisDetailRecord.Checkpoint> failed = r.checkpoints().stream()
+                .filter(c -> "FAIL".equalsIgnoreCase(c.result()))
+                .toList();
+            if (failed.isEmpty()) {
+                continue;
+            }
+            sb.append("\n### ").append(escapePipes(dash(r.qualityModel())))
+              .append(" - failed checkpoints\n\n");
+            sb.append("| Checkpoint | Type | Rule | Defects |\n|---|---|---|---|\n");
+            for (AnalysisDetailRecord.Checkpoint c : failed) {
+                List<AnalysisDetailRecord.ViolatedRule> rules =
+                    c.violatedRules() == null ? List.of() : c.violatedRules();
+                if (rules.isEmpty()) {
+                    sb.append("| ").append(escapePipes(nvl(c.name())))
+                      .append(" | ").append(escapePipes(nvl(c.type()))).append(" | - | - |\n");
+                }
+                for (AnalysisDetailRecord.ViolatedRule v : rules) {
+                    sb.append("| ").append(escapePipes(nvl(c.name())))
+                      .append(" | ").append(escapePipes(nvl(c.type())))
+                      .append(" | `").append(nvl(v.ruleCode())).append('`')
+                      .append(" | ").append(v.defectsCount()).append(" |\n");
+                }
+            }
+        }
+        return sb.toString();
+    }
+
+    /** "FAIL (score 0, threshold 100)", or why there is no verdict. */
+    private static String auditVerdict(AuditReport r) {
+        if (r.overallResult() == null) {
+            return "no audit (baselines are not audited)";
+        }
+        return r.overallResult() + " (score " + scoreText(r) + ")";
+    }
+
+    private static String scoreText(AuditReport r) {
+        if (r.score() == null) {
+            return "-";
+        }
+        String score = number(r.score());
+        return r.approvalThreshold() == null
+            ? score
+            : score + ", threshold " + number(r.approvalThreshold());
+    }
+
+    /** Drops the ".0" Kiuwan puts on whole scores. */
+    private static String number(Double value) {
+        return value == Math.rint(value) ? String.valueOf(value.longValue()) : String.valueOf(value);
     }
 
     // -------------------------------------------------------- Applications
@@ -339,6 +504,11 @@ public final class Formatter {
 
     private static String nvl(String s) {
         return s == null ? "" : s;
+    }
+
+    /** Like {@link #nvl}, but shows a dash so an empty column still reads as empty. */
+    private static String dash(String s) {
+        return s == null || s.isBlank() ? "-" : s;
     }
 
     /** Trims an ISO-8601 instant down to the date, which is all that matters at a glance. */

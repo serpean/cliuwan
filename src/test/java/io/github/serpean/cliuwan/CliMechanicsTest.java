@@ -100,8 +100,8 @@ class CliMechanicsTest {
     void helpListsSubcommands() {
         Run result = run("--help");
 
-        for (String command : new String[]{"apps", "defects", "analyses", "login", "logout",
-            "config", "cache"}) {
+        for (String command : new String[]{"apps", "defects", "analyses", "audit", "models",
+            "login", "logout", "config", "cache"}) {
             assertTrue(result.out().contains(command),
                 "the help should mention '" + command + "':\n" + result.out());
         }
@@ -124,7 +124,7 @@ class CliMechanicsTest {
         CommandLine cmd = new CommandLine(new DefectsCommand());
         var parsed = cmd.parseArgs("MY-APP", "-p", "Very high", "-l", "Java",
             "-c", "Security", "--file", "src/main", "--cwe", "89,79",
-            "--analysis", "delivery", "--order-by", "priority", "--asc",
+            "--analysis", "delivery", "--model", "CQM_Blocker", "--label", "1.0", "--order-by", "priority", "--asc",
             "--group-by", "cwe", "--fields", "rule,file", "--limit", "10",
             "--count", "--fail-on-found");
 

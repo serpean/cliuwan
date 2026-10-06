@@ -41,9 +41,28 @@ public class AnalysesCommand implements Callable<Integer> {
     @Option(names = "--deliveries-only", description = "Show deliveries only.")
     private boolean deliveriesOnly;
 
+    @Option(names = "--model", paramLabel = "NAME",
+        description = "Show only analyses of this quality model (exact name, any case). "
+            + "List them with 'cliuwan models'.")
+    private String model;
+
+    @Option(names = "--label", paramLabel = "TEXT",
+        description = "Show only analyses whose label contains this text, e.g. '0.1.0'.")
+    private String labelContains;
+
     @Override
     public Integer call() {
-        List<AnalysisSummaryRecord> analyses = parent.client().listAnalyses(appName, limit);
+        boolean filtering = model != null || labelContains != null;
+        // With a filter, the limit applies after it: otherwise "--limit 5 --model X" would
+        // look at the newest 5 analyses of every model and could show none of X.
+        List<AnalysisSummaryRecord> analyses =
+            parent.client().listAnalyses(appName, filtering ? 0 : limit);
+        if (filtering) {
+            analyses = analyses.stream()
+                .filter(a -> a.matches(model, labelContains))
+                .limit(limit > 0 ? limit : Long.MAX_VALUE)
+                .toList();
+        }
 
         if (baselinesOnly) {
             analyses = analyses.stream().filter(AnalysisSummaryRecord::isBaseline).toList();

@@ -6,11 +6,13 @@ import io.github.serpean.cliuwan.client.KiuwanApiException;
 import io.github.serpean.cliuwan.client.KiuwanClient;
 import io.github.serpean.cliuwan.command.AnalysesCommand;
 import io.github.serpean.cliuwan.command.AppsCommand;
+import io.github.serpean.cliuwan.command.AuditCommand;
 import io.github.serpean.cliuwan.command.CacheCommand;
 import io.github.serpean.cliuwan.command.ConfigCommand;
 import io.github.serpean.cliuwan.command.DefectsCommand;
 import io.github.serpean.cliuwan.command.LoginCommand;
 import io.github.serpean.cliuwan.command.LogoutCommand;
+import io.github.serpean.cliuwan.command.ModelsCommand;
 import io.github.serpean.cliuwan.output.OutputFormat;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
@@ -32,7 +34,7 @@ import java.util.concurrent.Callable;
     mixinStandardHelpOptions = true,
     versionProvider = CliuwanCommand.VersionProvider.class,
     subcommands = {AppsCommand.class, DefectsCommand.class, AnalysesCommand.class,
-        LoginCommand.class, LogoutCommand.class, ConfigCommand.class, CacheCommand.class},
+        AuditCommand.class, ModelsCommand.class, LoginCommand.class, LogoutCommand.class, ConfigCommand.class, CacheCommand.class},
     synopsisSubcommandLabel = "COMMAND",
     description = "Query Kiuwan applications and security defects.",
     footer = {
@@ -51,12 +53,18 @@ import java.util.concurrent.Callable;
         "  2  incorrect usage",
         "  3  credentials missing or rejected",
         "  4  defects found while --fail-on-found was set",
+        "  5  an audit failed while --fail-on-fail was set",
         "",
         "Examples:",
         "  cliuwan apps PAYMENTS",
         "  cliuwan defects MY-APP --priority 'Very high,High'",
         "  cliuwan defects MY-APP --group-by cwe",
-        "  cliuwan defects MY-APP --fields rule,file,line,cweId | jq '.[] | select(.cweId==89)'"
+        "  cliuwan defects MY-APP --fields rule,file,line,cweId | jq '.[] | select(.cweId==89)'",
+        "  cliuwan analyses MY-APP --model CQM_Blocker --label 1.2.0 --format text",
+        "  cliuwan defects MY-APP --model CQM_Blocker --analysis delivery --group-by rule",
+        "  cliuwan audit MY-APP --all-models --label 1.2.0 --format text",
+        "  cliuwan audit MY-APP --model CQM_Blocker --fail-on-fail",
+        "  cliuwan models --format text"
     }
 )
 public class CliuwanCommand implements Callable<Integer> {
@@ -71,6 +79,8 @@ public class CliuwanCommand implements Callable<Integer> {
     public static final int EXIT_AUTH = 3;
     /** Defects found while --fail-on-found was set. */
     public static final int EXIT_DEFECTS_FOUND = 4;
+    /** An audit (quality gate) failed while --fail-on-fail was set. */
+    public static final int EXIT_AUDIT_FAILED = 5;
 
     @Option(names = {"-f", "--format"}, scope = ScopeType.INHERIT,
         description = "Output format: ${COMPLETION-CANDIDATES}. Default: ${DEFAULT-VALUE}.")

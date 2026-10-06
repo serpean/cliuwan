@@ -2,10 +2,12 @@ package io.github.serpean.cliuwan.client;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.serpean.cliuwan.dto.AnalysisDetailRecord;
 import io.github.serpean.cliuwan.dto.AnalysisSummaryRecord;
 import io.github.serpean.cliuwan.dto.ApplicationRecord;
 import io.github.serpean.cliuwan.dto.DefectRecord;
 import io.github.serpean.cliuwan.dto.DefectsResponse;
+import io.github.serpean.cliuwan.dto.QualityModelRecord;
 
 import java.io.IOException;
 import java.net.URI;
@@ -237,20 +239,39 @@ public class KiuwanClient {
     }
 
     /**
-     * Turns an analysis selector into a concrete analysis.
+     * Turns an analysis selector into a concrete analysis, with no model or label filter.
      *
-     * @param selector {@code latest} (newest, baseline or delivery), {@code baseline},
-     *                 {@code delivery}, or a literal analysis code
-     * @return the chosen analysis, or {@code null} if the application has none matching
+     * @see #resolveAnalysis(String, String, String, String)
      */
     public AnalysisSummaryRecord resolveAnalysis(String appName, String selector) {
+        return resolveAnalysis(appName, selector, null, null);
+    }
+
+    /**
+     * Turns an analysis selector into a concrete analysis.
+     *
+     * <p>Without {@code model}, the newest analysis of any quality model wins, as it always
+     * did. That is ambiguous when CI analyses each commit under several models: the newest
+     * delivery may belong to either. {@code model} and {@code labelContains} narrow the
+     * candidates first, so {@code delivery} means "the newest delivery of that model".
+     *
+     * @param selector      {@code latest} (newest, baseline or delivery), {@code baseline},
+     *                      {@code delivery}, or a literal analysis code
+     * @param model         quality model name (exact, case-insensitive), or null for any
+     * @param labelContains text the label must contain (case-insensitive), or null for any
+     * @return the chosen analysis, or {@code null} if the application has none matching
+     */
+    public AnalysisSummaryRecord resolveAnalysis(String appName, String selector, String model,
+                                                 String labelContains) {
         String choice = (selector == null || selector.isBlank()) ? "latest" : selector.trim();
 
-        // A literal code needs no lookup against the analysis list.
+        // A literal code needs no lookup against the analysis list, and the filters do not
+        // apply to it: the user already said exactly which analysis they want.
         if (!choice.equalsIgnoreCase("latest")
             && !choice.equalsIgnoreCase("baseline")
             && !choice.equalsIgnoreCase("delivery")) {
-            return new AnalysisSummaryRecord(choice, null, null, null, null, null, null, null, null);
+            return new AnalysisSummaryRecord(choice, null, null, null, null, null, null, null,
+                null, null, null);
         }
 
         // Failed analyses are dropped: asking them for defects returns a 404 with
@@ -258,6 +279,7 @@ public class KiuwanClient {
         // attempt did not go through.
         List<AnalysisSummaryRecord> analyses = listAnalyses(appName, 0).stream()
             .filter(AnalysisSummaryRecord::succeeded)
+            .filter(a -> a.matches(model, labelContains))
             .toList();
 
         if (analyses.isEmpty()) {
@@ -271,6 +293,23 @@ public class KiuwanClient {
             // The list already comes newest first.
             default -> analyses.get(0);
         };
+    }
+
+    /**
+     * Fetches the metadata of one analysis, including its quality-gate result.
+     *
+     * @param analysisCode the analysis code, e.g. {@code A-7ea-1a11033204b}
+     */
+    public AnalysisDetailRecord getAnalysis(String analysisCode) {
+        return parse(get("/apps/analysis/" + urlPathSegment(analysisCode), Map.of()),
+            AnalysisDetailRecord.class);
+    }
+
+    /** Lists the quality models the account can see. */
+    public List<QualityModelRecord> listQualityModels() {
+        QualityModelRecord[] models = parse(get("/qualitymodels", Map.of()),
+            QualityModelRecord[].class);
+        return models == null ? List.of() : List.of(models);
     }
 
     /** A defect query, already aggregated across every page. */
