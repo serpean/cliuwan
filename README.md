@@ -22,7 +22,7 @@ Defects: 338 grouped by cwe
 
 |  |  |
 |---|---|
-| **Does** | Read results of analyses that already exist: applications, analyses, and their defects |
+| **Does** | Read results of analyses that already exist: applications, analyses, their defects, and their quality-gate (audit) results |
 | **Does not** | Run new analyses. That is the [Kiuwan Local Analyzer (KLA)](https://support.kiuwan.com/hc/en-us/articles/37024520067729-Kiuwan-Local-Analyzer-CLI-Command-Line-Interface), a separate and complementary tool |
 
 The two fit together: KLA scans your source and uploads the analysis; `cliuwan` reads the
@@ -140,14 +140,64 @@ different story.
 cliuwan analyses MY-APP --format text
 ```
 ```
-DATE         TYPE               STATUS    CODE                   LABEL
-2026-08-06   Complete delivery  SUCCESS   A-7ea-19fd692b3eb      1.0.0
-2026-08-06   Complete delivery  FAIL      A-7ea-19fd67aedfa      1.0.0
-2026-06-29   Baseline           SUCCESS   A-7ea-19f1258cc37      1.0.0
+DATE         TYPE               STATUS    MODEL            AUDIT  CODE                 LABEL
+2026-08-06   Complete delivery  SUCCESS   DeudaTecnica     OK     A-7ea-19fd692b3eb    1.0.0
+2026-08-06   Complete delivery  SUCCESS   CQM_Blocker      FAIL   A-7ea-19fd692b3e7    1.0.0_blocker
+2026-08-06   Complete delivery  FAIL      DeudaTecnica     -      A-7ea-19fd67aedfa    1.0.0
+2026-06-29   Baseline           SUCCESS   DeudaTecnica     -      A-7ea-19f1258cc37    1.0.0
 ```
 
 Failed analyses are skipped automatically — asking them for defects returns a 404. Pick one
 explicitly with `--analysis baseline`, `--analysis delivery`, or an analysis code.
+
+### Several quality models per commit
+
+Kiuwan CI can analyse one commit under several quality models (say, a technical-debt model and
+a blocker-only gate). Each one is a separate delivery, with its own `MODEL` and `AUDIT` (the
+gate verdict, `OK` or `FAIL`). Without `--model`, `cliuwan` reads the newest analysis of any
+model, as before. To pick one:
+
+```bash
+cliuwan models --format text                                 # the model names this account has
+cliuwan analyses MY-APP --model CQM_Blocker --format text    # only that model (exact, any case)
+cliuwan analyses MY-APP --label 1.2.0                        # labels containing "1.2.0"
+cliuwan defects MY-APP --model CQM_Blocker --analysis delivery --group-by rule
+cliuwan defects MY-APP --model CQM_Blocker --label 1.2.0      # that version, that model
+```
+
+`--model` and `--label` narrow the candidates before `--analysis latest|baseline|delivery`
+picks the newest. They are ignored when `--analysis` is a literal code.
+
+### Quality gate (audit)
+
+`cliuwan audit` shows whether the gate let an analysis through, which checkpoint stopped it,
+and which rules raised the defects. It resolves the analysis like `defects`, but defaults to
+`--analysis delivery`, because baselines are not audited.
+
+```console
+$ cliuwan audit MY-APP --all-models --label 1.2.0 --format text
+Application: MY-APP
+==============================================================================
+DeudaTecnica: OK (score 100, threshold 50)   A-7ea-19fd692b3eb  1.2.0  2026-08-06
+  Defects: 432 (new 0, removed 0)
+  [OK] No new defects - Threshold for maximum new defects (mandatory)
+==============================================================================
+CQM_Blocker: FAIL (score 0, threshold 100)   A-7ea-19fd692b3e7  1.2.0_blocker  2026-08-06
+  Defects: 49 (new 1, removed 384)
+  [FAIL] chk_blocker - Threshold for maximum new defects (mandatory)
+      OPT.JAVA.CMETRICS.TCC: 1 defects
+```
+
+```bash
+cliuwan audit MY-APP                              # newest delivery, any model
+cliuwan audit MY-APP --model CQM_Blocker          # newest delivery of that model
+cliuwan audit MY-APP --all-models                 # newest delivery of every model
+cliuwan audit MY-APP --analysis A-7ea-19fd692b3e7 # one analysis by code
+cliuwan audit MY-APP --all-models --fail-on-fail  # exit 5 if any gate failed
+```
+
+`--all-models` finds the models in the analysis listing, so a model added to the CI shows up
+without any change. Its JSON output is an array; a single audit is one object.
 
 ### Query defects
 
@@ -205,6 +255,9 @@ cliuwan defects MY-APP -p 'Very high' --fields file \
 ```bash
 cliuwan defects MY-APP -p 'Very high' --fail-on-found
 # exit 4 if any critical defect exists, 0 if clean
+
+cliuwan audit MY-APP --all-models --fail-on-fail
+# exit 5 if the Kiuwan quality gate of any model failed
 ```
 
 ## Exit codes
@@ -216,6 +269,7 @@ cliuwan defects MY-APP -p 'Very high' --fail-on-found
 | 2 | Incorrect usage |
 | 3 | Credentials missing or rejected |
 | 4 | Defects found while `--fail-on-found` was set |
+| 5 | An audit failed while `--fail-on-fail` was set |
 
 Errors go to **stderr**, so `cliuwan ... | jq` keeps working when something fails.
 
@@ -253,7 +307,7 @@ With it installed you can just ask, in any repository:
 
 ## Notes on the Kiuwan API
 
-Two behaviours worth knowing, both handled here:
+Three behaviours worth knowing, all handled here:
 
 - **Results are paginated** (`count`, 500 by default). Asking for a single page silently loses
   data on large applications. `cliuwan` walks every page.
@@ -261,11 +315,16 @@ Two behaviours worth knowing, both handled here:
   project with an old baseline that means stale results. `cliuwan` resolves the most recent
   successful analysis and reads `/apps/analysis/{code}/defects` instead, and prints on stderr
   which analysis the data came from.
+- **A 404 on the defects of an analysis can be transient.** Kiuwan answers
+  `Application not found` (code 03) even when the application exists. It was seen on a
+  blocker-model delivery that read fine minutes later, which fits an analysis still being
+  processed. `cliuwan` then names the analysis and its model and suggests a retry with
+  `--no-cache` or `cliuwan audit`. Errors are never cached.
 
 ## Development
 
 ```bash
-./gradlew test    # 48 tests, no network required
+./gradlew test    # 68 tests, no network required
 ./gradlew build   # produces build/libs/cliuwan.jar
 ```
 

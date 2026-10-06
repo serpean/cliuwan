@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.BiFunction;
 import java.util.function.Function;
 
 /**
@@ -29,6 +30,23 @@ class MockKiuwanServer implements AutoCloseable {
      * @param handler receives the query parameters and returns a [httpStatus, body] pair
      */
     MockKiuwanServer(Function<Map<String, String>, Object[]> handler) throws IOException {
+        this((path, params) -> handler.apply(params));
+    }
+
+    /**
+     * For tests that call several endpoints in one run, such as a command that lists the
+     * analyses and then reads one of them.
+     *
+     * @param handler receives the request path and query parameters and returns a
+     *                [httpStatus, body] pair
+     */
+    static MockKiuwanServer routing(BiFunction<String, Map<String, String>, Object[]> handler)
+        throws IOException {
+        return new MockKiuwanServer(handler);
+    }
+
+    private MockKiuwanServer(BiFunction<String, Map<String, String>, Object[]> handler)
+        throws IOException {
         this.server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         this.server.createContext("/", exchange -> {
             synchronized (receivedPaths) {
@@ -36,7 +54,7 @@ class MockKiuwanServer implements AutoCloseable {
                 receivedAuthHeaders.add(exchange.getRequestHeaders().getFirst("Authorization"));
             }
             Map<String, String> params = parseQuery(exchange.getRequestURI());
-            Object[] response = handler.apply(params);
+            Object[] response = handler.apply(exchange.getRequestURI().getPath(), params);
             respond(exchange, (Integer) response[0], (String) response[1]);
         });
         this.server.start();

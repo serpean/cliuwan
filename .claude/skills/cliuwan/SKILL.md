@@ -1,6 +1,6 @@
 ---
 name: cliuwan
-description: Query Kiuwan security defects and vulnerabilities for an application through the `cliuwan` CLI. Use it whenever the question is about vulnerabilities, defects, security technical debt, CWEs, Kiuwan findings, or an application's security posture; also when deciding what to fix first, or checking whether a specific file has reported defects. It does not run new analyses (that is the Kiuwan Local Analyzer).
+description: Query Kiuwan security defects, vulnerabilities and quality-gate (audit) results for an application through the `cliuwan` CLI. Use it whenever the question is about vulnerabilities, defects, security technical debt, CWEs, Kiuwan findings, quality models, a failed Kiuwan audit or gate in CI, or an application's security posture; also when deciding what to fix first, or checking whether a specific file has reported defects. It does not run new analyses (that is the Kiuwan Local Analyzer).
 ---
 
 # Querying Kiuwan from the CLI
@@ -41,8 +41,51 @@ months stale.
 cliuwan analyses MY-APP --format text
 ```
 
-Every `defects` call prints the analysis and its date on stderr. Mention that date when you
-report findings — "338 defects as of 2026-08-06" is useful, "338 defects" is not.
+Every `defects` call prints the analysis, its date and its quality model on stderr. Mention
+that date when you report findings — "338 defects as of 2026-08-06" is useful, "338 defects"
+is not.
+
+## Several quality models per commit
+
+CI can analyse one commit under several quality models. Each is a separate delivery, and the
+`analyses` listing shows its `MODEL` and its `AUDIT` verdict (`OK` / `FAIL`). Model names
+differ per organisation: **never guess one**, list them.
+
+```bash
+cliuwan models --format text                               # valid --model names
+cliuwan analyses MY-APP --model CQM_Blocker --format text  # one model (exact name, any case)
+cliuwan analyses MY-APP --label 1.2.0 --format text        # labels containing "1.2.0"
+```
+
+Without `--model`, `defects` reads the newest analysis of **any** model, which may not be the
+one the user means. When the listing shows more than one model, say which one you read, or
+pass it:
+
+```bash
+cliuwan defects MY-APP --model CQM_Blocker --analysis delivery --group-by rule
+cliuwan defects MY-APP --model CQM_Blocker --label 1.2.0 --group-by rule
+```
+
+`--model` and `--label` are ignored when `--analysis` is a literal code.
+
+## Why did the Kiuwan gate fail?
+
+When the user asks why CI or Kiuwan "failed", "blocked" or "did not pass", read the audit, not
+the defect count. It says which checkpoint failed and which rules raised the new defects:
+
+```bash
+cliuwan audit MY-APP --all-models --format text        # every model's gate, newest delivery
+cliuwan audit MY-APP --all-models --label 1.2.0 --format text
+cliuwan audit MY-APP --model CQM_Blocker               # JSON: checkpoints, violatedRules
+cliuwan audit MY-APP --analysis A-7ea-xxxxxxxx         # one analysis by code
+```
+
+`audit` defaults to `--analysis delivery`: baselines are not audited. Then drill into the
+failing model's defects with `defects --model <that model>`. `deliveryDefects.newDefects` is
+what a "no new defects" checkpoint counts.
+
+If `defects` returns 404 "Application not found" for an analysis, the analysis may still be
+in progress. Retry with `--no-cache` after a few minutes, or read `cliuwan audit` meanwhile.
 
 ## Main rule: aggregate before listing
 
@@ -129,6 +172,7 @@ and wants fresh data, add `--no-cache`.
 | 2 | Incorrect usage | Check the syntax with `cliuwan defects --help` |
 | 3 | Credentials missing or rejected | Ask the user to run `cliuwan login` |
 | 4 | Defects found with `--fail-on-found` | That is the expected quality-gate result |
+| 5 | An audit is FAIL with `--fail-on-fail` | The Kiuwan gate failed; read the checkpoints |
 
 ## What this CLI does not do
 

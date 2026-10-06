@@ -3,6 +3,7 @@ package io.github.serpean.cliuwan.command;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.serpean.cliuwan.CliuwanCommand;
 import io.github.serpean.cliuwan.cache.DiskCache;
+import io.github.serpean.cliuwan.client.KiuwanApiException;
 import io.github.serpean.cliuwan.client.KiuwanClient;
 import io.github.serpean.cliuwan.dto.AnalysisSummaryRecord;
 import io.github.serpean.cliuwan.dto.DefectRecord;
@@ -69,6 +70,15 @@ public class DefectsCommand implements Callable<Integer> {
             + "delivery), 'baseline', 'delivery', or an analysis code. Default: ${DEFAULT-VALUE}.")
     private String analysisSelector = "latest";
 
+    @Option(names = "--model", paramLabel = "NAME",
+        description = "Only consider analyses of this quality model (exact name, any case), "
+            + "e.g. 'CQM_Blocker'. List them with 'cliuwan models'. Default: any model.")
+    private String model;
+
+    @Option(names = "--label", paramLabel = "TEXT",
+        description = "Only consider analyses whose label contains this text, e.g. '0.1.0'.")
+    private String labelContains;
+
     @Option(names = "--order-by", paramLabel = "FIELD",
         description = "Sort by 'priority' or 'effort'.")
     private String orderBy;
@@ -114,10 +124,12 @@ public class DefectsCommand implements Callable<Integer> {
             return CliuwanCommand.EXIT_USAGE;
         }
 
-        AnalysisSummaryRecord analysis = resolveAnalysis();
+        AnalysisSummaryRecord analysis = AnalysisResolution.resolve(
+            parent, appName, analysisSelector, model, labelContains);
         if (analysis == null) {
             System.err.println("cliuwan: error: application '" + appName
-                + "' has no analysis matching --analysis " + analysisSelector + ".");
+                + "' has no analysis matching "
+                + AnalysisResolution.describe(analysisSelector, model, labelContains) + ".");
             System.err.println("        List the available ones with:  cliuwan analyses " + appName);
             return CliuwanCommand.EXIT_API_ERROR;
         }
@@ -211,23 +223,6 @@ public class DefectsCommand implements Callable<Integer> {
             .toList();
     }
 
-    /** Works out which analysis to read, caching the resolution alongside the defects. */
-    private AnalysisSummaryRecord resolveAnalysis() throws Exception {
-        DiskCache cache = parent.cache();
-        String cacheKey = "analysis|" + appName + "|" + analysisSelector;
-
-        String cached = cache.get(cacheKey);
-        if (cached != null) {
-            return MAPPER.readValue(cached, AnalysisSummaryRecord.class);
-        }
-
-        AnalysisSummaryRecord analysis = parent.client().resolveAnalysis(appName, analysisSelector);
-        if (analysis != null) {
-            cache.put(cacheKey, MAPPER.writeValueAsString(analysis));
-        }
-        return analysis;
-    }
-
     /** Fetches the defects of the given analysis, using the cache while it is valid. */
     private KiuwanClient.DefectsQueryResult fetch(AnalysisSummaryRecord analysis) throws Exception {
         DiskCache cache = parent.cache();
@@ -242,10 +237,48 @@ public class DefectsCommand implements Callable<Integer> {
             return MAPPER.readValue(cached, KiuwanClient.DefectsQueryResult.class);
         }
 
-        KiuwanClient.DefectsQueryResult result = parent.client().getDefectsByAnalysis(
-            analysis.code(), priorities, characteristics, languages, fileContains,
-            orderBy, ascending);
+        KiuwanClient.DefectsQueryResult result;
+        try {
+            result = parent.client().getDefectsByAnalysis(
+                analysis.code(), priorities, characteristics, languages, fileContains,
+                orderBy, ascending);
+        } catch (KiuwanApiException e) {
+            if (e.getStatusCode() != 404) {
+                throw e;
+            }
+            throw notFound(analysis, e);
+        }
         cache.put(cacheKey, MAPPER.writeValueAsString(result));
         return result;
+    }
+
+    /**
+     * Rewrites a 404 on the defects of an analysis into a message that says which one failed.
+     *
+     * <p>The API answers "Application not found" even though the application exists, so the
+     * generic 404 text sends the user looking in the wrong place. It happens for an analysis
+     * that failed or that Kiuwan has not finished processing; CI sends one delivery per quality
+     * model, and the later ones can still be in progress after the first is readable.
+     */
+    private KiuwanApiException notFound(AnalysisSummaryRecord analysis, KiuwanApiException cause) {
+        String modelName = analysis.qualityModel();
+        if (modelName == null) {
+            // A code passed by hand carries no model; the listing knows it. Best effort only:
+            // this runs on the error path, and the original error matters more.
+            try {
+                modelName = parent.client().listAnalyses(appName, 0).stream()
+                    .filter(a -> analysis.code().equals(a.code()))
+                    .map(AnalysisSummaryRecord::qualityModel)
+                    .findFirst().orElse(null);
+            } catch (RuntimeException ignored) {
+                // Keep the original error.
+            }
+        }
+        return new KiuwanApiException("Kiuwan returned 404 for the defects of analysis "
+            + analysis.code() + " (model " + (modelName == null ? "unknown" : modelName)
+            + ") of '" + appName + "'. The analysis may have failed or still be in progress;"
+            + " retry with --no-cache in a few minutes, check it with 'cliuwan analyses "
+            + appName + "', or read its quality gate with 'cliuwan audit " + appName
+            + " --analysis " + analysis.code() + "'. " + cause.getMessage(), 404, cause);
     }
 }

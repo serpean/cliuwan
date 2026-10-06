@@ -8,6 +8,11 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
  *
  * <p>Both endpoints share the same base shape; the branch and change-request fields are only
  * populated for deliveries.
+ *
+ * <p>Kiuwan CI can analyse one commit under several quality models, which shows up as several
+ * deliveries with the same date and near-identical labels. {@code qualityModel} is what tells
+ * them apart, and {@code auditResult} ({@code OK} / {@code FAIL}, absent on baselines) is the
+ * verdict of that model's quality gate.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record AnalysisSummaryRecord(
@@ -19,7 +24,9 @@ public record AnalysisSummaryRecord(
     String invoker,
     String branchName,
     String changeRequest,
-    String changeRequestStatus
+    String changeRequestStatus,
+    String qualityModel,
+    String auditResult
 ) {
 
     /** Whether this analysis is a baseline rather than a delivery. */
@@ -36,6 +43,22 @@ public record AnalysisSummaryRecord(
      */
     public boolean succeeded() {
         return status == null || status.isBlank() || status.equalsIgnoreCase("SUCCESS");
+    }
+
+    /**
+     * Whether this analysis passes the {@code --model} and {@code --label} filters.
+     *
+     * <p>The model is compared exactly, ignoring case, because model names such as
+     * {@code CQM_Blocker} are identifiers. The label is a case-insensitive substring, so
+     * {@code 0.1.0} picks every build of that version. A null filter accepts everything.
+     */
+    public boolean matches(String model, String labelContains) {
+        if (model != null && !model.isBlank()
+            && (qualityModel == null || !qualityModel.equalsIgnoreCase(model.trim()))) {
+            return false;
+        }
+        return labelContains == null || labelContains.isBlank()
+            || (label != null && label.toLowerCase().contains(labelContains.trim().toLowerCase()));
     }
 
     /** Short date, for listings. */
