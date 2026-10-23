@@ -5,7 +5,7 @@ plugins {
 }
 
 group = 'io.github.serpean'
-version = '0.1.0'
+version = '0.3.0'
 description = 'cliuwan - query Kiuwan applications and security defects from the command line'
 
 // No Spring Boot on purpose: the CLI is invoked once per query, so JVM startup is the
